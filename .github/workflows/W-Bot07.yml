@@ -1,0 +1,213 @@
+name: W-Bot07
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */5 * * *"
+
+concurrency:
+  group: w-bot07-whatsapp-assistant
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      SESSION_ENCRYPTION_KEY: ${{ secrets.SESSION_ENCRYPTION_KEY }}
+      SESSION_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TZ: Asia/Karachi
+    steps:
+      - name: Wait for any previous run to finish saving
+        run: sleep 25
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify encryption secret
+        run: |
+          if [ -z "${SESSION_ENCRYPTION_KEY:-}" ]; then
+            echo "::error::Secret SESSION_ENCRYPTION_KEY is missing. Add it in Settings > Secrets and variables > Actions > New repository secret, then re-run this workflow."
+            exit 1
+          fi
+          if [ "${#SESSION_ENCRYPTION_KEY}" -lt 16 ]; then
+            echo "::error::SESSION_ENCRYPTION_KEY must be at least 16 characters long."
+            exit 1
+          fi
+          echo "Encryption secret found."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Create session helper script
+        run: |
+          cat > "$RUNNER_TEMP/session.sh" <<'SESSION_SCRIPT_EOF'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          cd "${GITHUB_WORKSPACE:-.}" || exit 1
+
+          SESSION_DIR="session_bot"
+          STORE_DIR="session_store"
+          ARCHIVE="session.tar.gz.enc"
+          BRANCH="session"
+          LOCK_FILE="${RUNNER_TEMP:-/tmp}/session_backup.lock"
+          HASH_FILE="${RUNNER_TEMP:-/tmp}/session_last_hash"
+          REPO_URL="https://x-access-token:${SESSION_GIT_TOKEN:-}@github.com/${GITHUB_REPOSITORY:-}.git"
+
+          encrypt() { openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:SESSION_ENCRYPTION_KEY -in "$1" -out "$2"; }
+          decrypt() { openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:SESSION_ENCRYPTION_KEY -in "$1"; }
+
+          restore() {
+            mkdir -p "$SESSION_DIR"
+            rm -rf "$STORE_DIR"
+            local ok=0 rc i
+            for i in 1 2 3; do
+              git ls-remote --exit-code --heads "$REPO_URL" "$BRANCH" >/dev/null 2>&1
+              rc=$?
+              if [ "$rc" -eq 2 ]; then
+                echo "No session branch yet. Starting with an empty session_bot (fresh pairing)."
+                return 0
+              fi
+              if [ "$rc" -eq 0 ]; then
+                rm -rf "$STORE_DIR"
+                if git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$STORE_DIR" >/dev/null 2>&1; then
+                  ok=1
+                  break
+                fi
+              fi
+              echo "Temporary Git error (attempt $i/3). Retrying..."
+              sleep $((i * 5))
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::Could not fetch the session branch. Aborting to protect the saved session."
+              return 1
+            fi
+            if [ ! -f "$STORE_DIR/$ARCHIVE" ]; then
+              echo "Session branch has no encrypted archive. Starting fresh."
+              return 0
+            fi
+            rm -rf "$SESSION_DIR"
+            if decrypt "$STORE_DIR/$ARCHIVE" | tar -xz -C . && [ -f "$SESSION_DIR/creds.json" ]; then
+              echo "Encrypted session restored."
+            else
+              rm -rf "$SESSION_DIR"
+              echo "::error::Could not decrypt the session backup. Wrong SESSION_ENCRYPTION_KEY or corrupted archive. Fix the secret, or delete the 'session' branch to pair again."
+              return 1
+            fi
+          }
+
+          do_save() {
+            local tmp hash pushed=0 attempt
+            tmp="$(mktemp -d)"
+            mkdir -p "$tmp/snap"
+            if ! cp -a "$SESSION_DIR" "$tmp/snap/"; then rm -rf "$tmp"; return 1; fi
+            if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$tmp/snap/$SESSION_DIR/creds.json" 2>/dev/null; then
+              echo "creds.json not readable yet. Skipping this backup."
+              rm -rf "$tmp"
+              return 0
+            fi
+            hash="$(cd "$tmp/snap/$SESSION_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+            if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$hash" ]; then
+              echo "Session unchanged. No backup needed."
+              rm -rf "$tmp"
+              return 0
+            fi
+            if ! tar -czf "$tmp/plain.tgz" -C "$tmp/snap" "$SESSION_DIR" || ! encrypt "$tmp/plain.tgz" "$tmp/$ARCHIVE"; then
+              echo "Encryption failed."
+              rm -rf "$tmp"
+              return 1
+            fi
+            rm -rf "$STORE_DIR"
+            mkdir -p "$STORE_DIR"
+            cp "$tmp/$ARCHIVE" "$STORE_DIR/$ARCHIVE"
+            printf '%s\n' "Encrypted WhatsApp session backup. Do not edit." > "$STORE_DIR/README.txt"
+            git -C "$STORE_DIR" init -q
+            git -C "$STORE_DIR" symbolic-ref HEAD "refs/heads/$BRANCH"
+            git -C "$STORE_DIR" config user.name "github-actions[bot]"
+            git -C "$STORE_DIR" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C "$STORE_DIR" add -A
+            git -C "$STORE_DIR" commit -q -m "Encrypted session backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git -C "$STORE_DIR" remote add origin "$REPO_URL"
+            for attempt in 1 2 3; do
+              if git -C "$STORE_DIR" push -q --force origin "$BRANCH" >/dev/null 2>&1; then
+                pushed=1
+                break
+              fi
+              echo "Temporary Git error while pushing (attempt $attempt/3)."
+              sleep $((attempt * 5))
+            done
+            rm -rf "$tmp" "$STORE_DIR"
+            if [ "$pushed" -eq 1 ]; then
+              echo "$hash" > "$HASH_FILE"
+              echo "Encrypted session backup pushed."
+              return 0
+            fi
+            echo "Backup push failed. Will retry on the next cycle."
+            return 1
+          }
+
+          save() {
+            local mode="${1:-quick}" waitopt="-n"
+            [ "$mode" = "final" ] && waitopt="-w 180"
+            if [ -z "${SESSION_ENCRYPTION_KEY:-}" ]; then echo "Skipping backup: encryption key missing."; return 0; fi
+            if [ ! -f "$SESSION_DIR/creds.json" ]; then echo "Skipping backup: no creds.json yet."; return 0; fi
+            (
+              flock $waitopt 9 || { echo "Another backup is running. Skipping."; exit 0; }
+              do_save
+            ) 9>"$LOCK_FILE"
+          }
+
+          loop() {
+            while true; do
+              sleep 240
+              save quick || true
+            done
+          }
+
+          case "${1:-}" in
+            restore) restore ;;
+            save)    save quick ;;
+            final)   save final ;;
+            loop)    loop ;;
+            *) echo "usage: session.sh restore|save|final|loop"; exit 2 ;;
+          esac
+          SESSION_SCRIPT_EOF
+          chmod +x "$RUNNER_TEMP/session.sh"
+
+      - name: Restore encrypted session
+        run: bash "$RUNNER_TEMP/session.sh" restore
+
+      - name: Install dependencies
+        run: |
+          for i in 1 2 3; do
+            npm install --omit=dev --no-audit --no-fund --loglevel=error && break
+            echo "npm install failed (attempt $i/3). Retrying..."
+            sleep 10
+          done
+          test -d node_modules/@whiskeysockets/baileys
+
+      - name: Run WhatsApp assistant
+        timeout-minutes: 335
+        run: |
+          bash "$RUNNER_TEMP/session.sh" loop &
+          LOOP_PID=$!
+          node index.js
+          EXIT_CODE=$?
+          kill "$LOOP_PID" 2>/dev/null || true
+          exit "$EXIT_CODE"
+
+      - name: Final session save
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/session.sh" ]; then
+            bash "$RUNNER_TEMP/session.sh" final || true
+          fi
