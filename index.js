@@ -12,14 +12,14 @@
  *                    (must be a DIFFERENT number from the bot account)
  * ====================================================================== */
 const SETTINGS = {
-  BOT_NAME: "Personal Assistant",
+  BOT_NAME:  "Jibran Assistant",
   BOT_WHATSAPP_NUMBER: "03XXXXXXXXX",
-  OWNER_NAME: "YOUR NAME",
+  OWNER_NAME: "Jibran",
   DEFAULT_LANGUAGE: "auto",
   REPLY_MODE: "AUTO",
   ENABLE_GROUP_MESSAGES: false,
   ENABLE_STATUS_MESSAGES: false,
-  OWNER_NUMBER: "03XXXXXXXXX",
+  OWNER_NUMBER: "03704295530",
   CUSTOM_GREETING: "",
   CUSTOM_RULES: "",
 };
