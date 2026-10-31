@@ -13,7 +13,7 @@
  * ====================================================================== */
 const SETTINGS = {
   BOT_NAME:  "Jibran Assistant",
-  BOT_WHATSAPP_NUMBER: "03XXXXXXXXX",
+  BOT_WHATSAPP_NUMBER: "03704295530",
   OWNER_NAME: "Jibran",
   DEFAULT_LANGUAGE: "auto",
   REPLY_MODE: "AUTO",
