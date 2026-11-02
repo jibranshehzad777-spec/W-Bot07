@@ -1,3 +1,4 @@
+
 name: W-Bot07
 
 on:
@@ -18,11 +19,13 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     env:
-  SESSION_ENCRYPTION_KEY: ${{ secrets.SESSION_ENCRYPTION_KEY }}
-  SESSION_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-  TZ: Asia/Karachi
+      SESSION_ENCRYPTION_KEY: ${{ secrets.SESSION_ENCRYPTION_KEY }}
+      SESSION_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      TZ: Asia/Karachi
+
     steps:
+
       - name: Wait for any previous run to finish saving
         run: sleep 25
 
