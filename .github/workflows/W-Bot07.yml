@@ -18,10 +18,11 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    env:
+        env:
       SESSION_ENCRYPTION_KEY: ${{ secrets.SESSION_ENCRYPTION_KEY }}
       SESSION_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OWNER_INTL: ${{ secrets.OWNER_INTL }}
       TZ: Asia/Karachi
 
     steps:
