@@ -21,7 +21,9 @@ jobs:
     env:
       SESSION_ENCRYPTION_KEY: ${{ secrets.SESSION_ENCRYPTION_KEY }}
       SESSION_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GROQ_API_KEY: "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"
       TZ: Asia/Karachi
+
     steps:
       - name: Wait for any previous run to finish saving
         run: sleep 25
@@ -42,6 +44,14 @@ jobs:
             exit 1
           fi
           echo "Encryption secret found."
+
+      - name: Verify Groq API secret
+        run: |
+          if [ -z "${GROQ_API_KEY:-}" ]; then
+            echo "::error::Secret GROQ_API_KEY is missing. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Groq API secret found."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
